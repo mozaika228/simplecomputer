@@ -1,0 +1,4 @@
+build/
+*.sc
+*.sa.gen
+*.log
