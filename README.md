@@ -52,6 +52,21 @@ Build output:
 - `simpleassembler`
 - `simplebasic`
 
+## Build (Makefile, no CMake)
+
+If you have `gcc` and `make`, you can build without CMake:
+
+```bash
+make
+```
+
+Useful targets:
+
+- `make` - build all binaries into `build/`
+- `make examples` - compile `sum.sb -> sum_generated.sa -> sum.sc`
+- `make run` - run console with `examples/sum.sc`
+- `make clean` - remove build artifacts
+
 ## Quick Start
 
 ### 1) Compile Simple Basic to Assembly
