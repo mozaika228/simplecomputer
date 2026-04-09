@@ -319,3 +319,216 @@ void sc_dump_cache(const SCComputer *sc) {
         printf("\n");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Lab-style API with global state (memory/registers/command codec/diagnostics)
+// ---------------------------------------------------------------------------
+
+static int g_memory[SC_MEMORY_SIZE];
+static int g_accumulator = 0;
+static int g_icounter = 0;
+static int g_flags = 0;
+
+static int g_in_bounds(int address) {
+    return address >= 0 && address < SC_MEMORY_SIZE;
+}
+
+static int g_fit_15bit(int value) {
+    return value >= SC_MIN_VALUE && value <= SC_MAX_VALUE;
+}
+
+int sc_memoryInit(void) {
+    for (int i = 0; i < SC_MEMORY_SIZE; ++i) g_memory[i] = 0;
+    return 0;
+}
+
+int sc_memorySet(int address, int value) {
+    if (!g_in_bounds(address)) {
+        sc_regSet(SC_M, 1);
+        return -1;
+    }
+    if (!g_fit_15bit(value)) return -1;
+    g_memory[address] = value;
+    return 0;
+}
+
+int sc_memoryGet(int address, int *value) {
+    if (!value) return -1;
+    if (!g_in_bounds(address)) {
+        sc_regSet(SC_M, 1);
+        return -1;
+    }
+    *value = g_memory[address];
+    return 0;
+}
+
+int sc_memorySave(const char *filename) {
+    if (!filename) return -1;
+    FILE *f = fopen(filename, "wb");
+    if (!f) return -1;
+    size_t wr = fwrite(g_memory, sizeof(g_memory[0]), SC_MEMORY_SIZE, f);
+    fclose(f);
+    return (wr == SC_MEMORY_SIZE) ? 0 : -1;
+}
+
+int sc_memoryLoad(const char *filename) {
+    if (!filename) return -1;
+    FILE *f = fopen(filename, "rb");
+    if (!f) return -1;
+
+    int temp[SC_MEMORY_SIZE];
+    size_t rd = fread(temp, sizeof(temp[0]), SC_MEMORY_SIZE, f);
+    fclose(f);
+    if (rd != SC_MEMORY_SIZE) return -1;
+
+    for (int i = 0; i < SC_MEMORY_SIZE; ++i) {
+        if (!g_fit_15bit(temp[i])) return -1;
+    }
+    memcpy(g_memory, temp, sizeof(g_memory));
+    return 0;
+}
+
+int sc_regInit(void) {
+    g_flags = 0;
+    return 0;
+}
+
+int sc_regSet(int reg, int value) {
+    if (!(reg == SC_P || reg == SC_0 || reg == SC_M || reg == SC_T || reg == SC_E)) return -1;
+    if (!(value == 0 || value == 1)) return -1;
+
+    if (value) g_flags |= reg;
+    else g_flags &= ~reg;
+    return 0;
+}
+
+int sc_regGet(int reg, int *value) {
+    if (!value) return -1;
+    if (!(reg == SC_P || reg == SC_0 || reg == SC_M || reg == SC_T || reg == SC_E)) return -1;
+    *value = (g_flags & reg) ? 1 : 0;
+    return 0;
+}
+
+int sc_accumulatorInit(void) {
+    g_accumulator = 0;
+    return 0;
+}
+
+int sc_accumulatorSet(int value) {
+    if (!g_fit_15bit(value)) return -1;
+    g_accumulator = value;
+    return 0;
+}
+
+int sc_accumulatorGet(int *value) {
+    if (!value) return -1;
+    *value = g_accumulator;
+    return 0;
+}
+
+int sc_icounterInit(void) {
+    g_icounter = 0;
+    return 0;
+}
+
+int sc_icounterSet(int value) {
+    if (!g_in_bounds(value)) return -1;
+    g_icounter = value;
+    return 0;
+}
+
+int sc_icounterGet(int *value) {
+    if (!value) return -1;
+    *value = g_icounter;
+    return 0;
+}
+
+int sc_commandValidate(int command) {
+    static const int valid[] = {
+        SC_READ, SC_WRITE, SC_LOAD, SC_STORE, SC_ADD, SC_SUB, SC_DIVIDE, SC_MUL,
+        SC_JUMP, SC_JNEG, SC_JZ, SC_HALT, SC_AND, SC_OR, SC_XOR, SC_NOT, SC_SHL, SC_SHR
+    };
+    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i) {
+        if (valid[i] == command) return 0;
+    }
+    return -1;
+}
+
+int sc_commandEncode(int sign, int command, int operand, int *value) {
+    if (!value) return -1;
+    if (!(sign == 0 || sign == 1)) return -1;
+    if (sc_commandValidate(command) != 0) return -1;
+    if (operand < 0 || operand > SC_OPERAND_MASK) return -1;
+
+    int encoded = ((sign & 0x1) << SC_COMMAND_SIGN_BIT) |
+                  ((command & SC_OPCODE_MASK) << SC_OPCODE_SHIFT) |
+                  (operand & SC_OPERAND_MASK);
+    *value = encoded;
+    return 0;
+}
+
+int sc_commandDecode(int value, int *sign, int *command, int *operand) {
+    int masked = value & SC_WORD_MASK;
+    int s = (masked >> SC_COMMAND_SIGN_BIT) & 0x1;
+    int c = (masked >> SC_OPCODE_SHIFT) & SC_OPCODE_MASK;
+    int o = masked & SC_OPERAND_MASK;
+
+    if (sc_commandValidate(c) != 0) return -1;
+
+    if (sign) *sign = s;
+    if (command) *command = c;
+    if (operand) *operand = o;
+    return 0;
+}
+
+static void print_binary15(int value) {
+    for (int i = 14; i >= 0; --i) {
+        putchar(((value >> i) & 1) ? '1' : '0');
+        if (i % 4 == 0 && i != 0) putchar(' ');
+    }
+}
+
+void printCell(int address) {
+    int value = 0;
+    if (sc_memoryGet(address, &value) != 0) {
+        printf("[%03d] <invalid address>\n", address);
+        return;
+    }
+
+    int sign = 0, cmd = 0, op = 0;
+    if (sc_commandDecode(value, &sign, &cmd, &op) == 0) {
+        printf("[%03d] CMD %c %02d %02d (raw=%d)\n", address, sign ? '-' : '+', cmd, op, value);
+    } else {
+        printf("[%03d] DATA %d\n", address, value);
+    }
+}
+
+void printFlags(void) {
+    int p = 0, z = 0, m = 0, t = 0, e = 0;
+    sc_regGet(SC_P, &p);
+    sc_regGet(SC_0, &z);
+    sc_regGet(SC_M, &m);
+    sc_regGet(SC_T, &t);
+    sc_regGet(SC_E, &e);
+    printf("%c %c %c %c %c\n",
+           p ? 'P' : '_',
+           z ? '0' : '_',
+           m ? 'M' : '_',
+           t ? 'T' : '_',
+           e ? 'E' : '_');
+}
+
+void printDecodedCommand(int value) {
+    int masked = value & SC_WORD_MASK;
+    printf("dec=%d oct=%o hex=%04X bin=", value, masked, masked);
+    print_binary15(masked);
+    printf("\n");
+}
+
+void printAccumulator(void) {
+    printf("ACC=%d\n", g_accumulator);
+}
+
+void printCounters(void) {
+    printf("IC=%d\n", g_icounter);
+}

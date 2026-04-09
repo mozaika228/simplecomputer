@@ -40,4 +40,39 @@ void sc_dump_cache(const SCComputer *sc);
 
 int16_t sc_clamp15(int32_t value, bool *overflowed);
 
+// Lab-style API (global SC state)
+#define SC_P 0x01
+#define SC_0 0x02
+#define SC_M 0x04
+#define SC_T 0x08
+#define SC_E 0x10
+
+int sc_memoryInit(void);
+int sc_memorySet(int address, int value);
+int sc_memoryGet(int address, int *value);
+int sc_memorySave(const char *filename);
+int sc_memoryLoad(const char *filename);
+
+int sc_regInit(void);
+int sc_regSet(int reg, int value);
+int sc_regGet(int reg, int *value);
+
+int sc_accumulatorInit(void);
+int sc_accumulatorSet(int value);
+int sc_accumulatorGet(int *value);
+
+int sc_icounterInit(void);
+int sc_icounterSet(int value);
+int sc_icounterGet(int *value);
+
+int sc_commandEncode(int sign, int command, int operand, int *value);
+int sc_commandDecode(int value, int *sign, int *command, int *operand);
+int sc_commandValidate(int command);
+
+void printCell(int address);
+void printFlags(void);
+void printDecodedCommand(int value);
+void printAccumulator(void);
+void printCounters(void);
+
 #endif

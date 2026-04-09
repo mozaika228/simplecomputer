@@ -65,6 +65,7 @@ Useful targets:
 - `make` - build all binaries into `build/`
 - `make examples` - compile `sum.sb -> sum_generated.sa -> sum.sc`
 - `make run` - run console with `examples/sum.sc`
+- `make pr01` - run baseline memory/registers/codec diagnostics
 - `make clean` - remove build artifacts
 
 ## Quick Start

@@ -21,6 +21,7 @@ BASIC_OBJ := $(BUILD_DIR)/simplebasic_lib.o
 CONSOLE_OBJ := $(BUILD_DIR)/console_main.o
 SIMPLEASM_MAIN_OBJ := $(BUILD_DIR)/simpleassembler_main.o
 SIMPLEBASIC_MAIN_OBJ := $(BUILD_DIR)/simplebasic_main.o
+PR01_OBJ := $(BUILD_DIR)/pr01.o
 
 EXE_EXT :=
 ifeq ($(OS),Windows_NT)
@@ -30,10 +31,11 @@ endif
 CONSOLE_BIN := $(BUILD_DIR)/console$(EXE_EXT)
 SIMPLEASM_BIN := $(BUILD_DIR)/simpleassembler$(EXE_EXT)
 SIMPLEBASIC_BIN := $(BUILD_DIR)/simplebasic$(EXE_EXT)
+PR01_BIN := $(BUILD_DIR)/pr01$(EXE_EXT)
 
-.PHONY: all clean run examples
+.PHONY: all clean run examples pr01
 
-all: $(CONSOLE_BIN) $(SIMPLEASM_BIN) $(SIMPLEBASIC_BIN)
+all: $(CONSOLE_BIN) $(SIMPLEASM_BIN) $(SIMPLEBASIC_BIN) $(PR01_BIN)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -65,6 +67,9 @@ $(SIMPLEASM_MAIN_OBJ): simpleassembler/main.c | $(BUILD_DIR)
 $(SIMPLEBASIC_MAIN_OBJ): simplebasic/main.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(PR01_OBJ): pr01.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(CONSOLE_BIN): $(CONSOLE_OBJ) $(CORE_OBJ) $(TERM_OBJ) $(READKEY_OBJ) $(BIGCHARS_OBJ) $(ASM_OBJ) $(BASIC_OBJ)
 	$(CC) $^ $(LDFLAGS) -o $@
 
@@ -74,9 +79,15 @@ $(SIMPLEASM_BIN): $(SIMPLEASM_MAIN_OBJ) $(ASM_OBJ) $(CORE_OBJ)
 $(SIMPLEBASIC_BIN): $(SIMPLEBASIC_MAIN_OBJ) $(BASIC_OBJ)
 	$(CC) $^ $(LDFLAGS) -o $@
 
+$(PR01_BIN): $(PR01_OBJ) $(CORE_OBJ)
+	$(CC) $^ $(LDFLAGS) -o $@
+
 examples: all
 	$(SIMPLEBASIC_BIN) examples/sum.sb examples/sum_generated.sa
 	$(SIMPLEASM_BIN) examples/sum_generated.sa examples/sum.sc
+
+pr01: $(PR01_BIN)
+	$(PR01_BIN)
 
 run: all
 	$(CONSOLE_BIN) examples/sum.sc
