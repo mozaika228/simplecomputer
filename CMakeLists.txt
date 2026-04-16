@@ -21,3 +21,6 @@ target_link_libraries(simpleassembler PRIVATE simpleassembler_lib mySimpleComput
 
 add_executable(simplebasic simplebasic/main.c)
 target_link_libraries(simplebasic PRIVATE simplebasic_lib)
+
+add_executable(pr01 pr01.c)
+target_link_libraries(pr01 PRIVATE mySimpleComputer)

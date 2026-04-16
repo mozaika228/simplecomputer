@@ -68,6 +68,24 @@ Useful targets:
 - `make pr01` - run baseline memory/registers/codec diagnostics
 - `make clean` - remove build artifacts
 
+## myTerm API
+
+The terminal library (`myTerm`) now provides low-level ANSI terminal control using `write`:
+
+- `mt_clrscr()`
+- `mt_gotoXY(row, col)`
+- `mt_getscreensize(&rows, &cols)`
+- `mt_setfgcolor(color)`
+- `mt_setbgcolor(color)`
+- `mt_setdefaultcolor()`
+- `mt_setcursorvisible(value)`
+- `mt_delLine()`
+
+The `console` app checks:
+
+- output is a terminal (`isatty`)
+- terminal size is large enough (at least `110x26`)
+
 ## Quick Start
 
 ### 1) Compile Simple Basic to Assembly
