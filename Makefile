@@ -1,4 +1,5 @@
 CC ?= gcc
+AR ?= ar
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Iinclude
 LDFLAGS ?=
 
@@ -32,10 +33,11 @@ CONSOLE_BIN := $(BUILD_DIR)/console$(EXE_EXT)
 SIMPLEASM_BIN := $(BUILD_DIR)/simpleassembler$(EXE_EXT)
 SIMPLEBASIC_BIN := $(BUILD_DIR)/simplebasic$(EXE_EXT)
 PR01_BIN := $(BUILD_DIR)/pr01$(EXE_EXT)
+MYTERM_LIB := myTerm/libmyTerm.a
 
 .PHONY: all clean run examples pr01
 
-all: $(CONSOLE_BIN) $(SIMPLEASM_BIN) $(SIMPLEBASIC_BIN) $(PR01_BIN)
+all: $(MYTERM_LIB) $(CONSOLE_BIN) $(SIMPLEASM_BIN) $(SIMPLEBASIC_BIN) $(PR01_BIN)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -45,6 +47,9 @@ $(CORE_OBJ): $(CORE_SRC) include/mySimpleComputer.h include/sc_types.h | $(BUILD
 
 $(TERM_OBJ): $(TERM_SRC) include/myTerm.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(MYTERM_LIB): $(TERM_OBJ)
+	$(AR) rcs $@ $^
 
 $(READKEY_OBJ): $(READKEY_SRC) include/myReadKey.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -70,7 +75,7 @@ $(SIMPLEBASIC_MAIN_OBJ): simplebasic/main.c | $(BUILD_DIR)
 $(PR01_OBJ): pr01.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(CONSOLE_BIN): $(CONSOLE_OBJ) $(CORE_OBJ) $(TERM_OBJ) $(READKEY_OBJ) $(BIGCHARS_OBJ) $(ASM_OBJ) $(BASIC_OBJ)
+$(CONSOLE_BIN): $(CONSOLE_OBJ) $(CORE_OBJ) $(MYTERM_LIB) $(READKEY_OBJ) $(BIGCHARS_OBJ) $(ASM_OBJ) $(BASIC_OBJ)
 	$(CC) $^ $(LDFLAGS) -o $@
 
 $(SIMPLEASM_BIN): $(SIMPLEASM_MAIN_OBJ) $(ASM_OBJ) $(CORE_OBJ)
@@ -94,3 +99,4 @@ run: all
 
 clean:
 	rm -rf $(BUILD_DIR)
+	rm -f $(MYTERM_LIB)

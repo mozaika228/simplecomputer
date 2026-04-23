@@ -17,11 +17,13 @@ typedef enum {
 int mt_clrscr(void);
 int mt_gotoXY(int row, int col);
 int mt_getscreensize(int *rows, int *cols);
+int mt_getscreenize(int *rows, int *cols);
 int mt_setfgcolor(mt_color color);
 int mt_setbgcolor(mt_color color);
 int mt_setdefaultcolor(void);
 int mt_setcursorvisible(int value);
 int mt_delLine(void);
+int mt_delline(void);
 
 // Backward-compatible aliases used by earlier stages.
 #define MT_BLACK MT_COLOR_BLACK

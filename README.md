@@ -63,6 +63,7 @@ make
 Useful targets:
 
 - `make` - build all binaries into `build/`
+- `myTerm/libmyTerm.a` is built automatically as a static terminal library
 - `make examples` - compile `sum.sb -> sum_generated.sa -> sum.sc`
 - `make run` - run console with `examples/sum.sc`
 - `make pr01` - run baseline memory/registers/codec diagnostics
@@ -85,6 +86,20 @@ The `console` app checks:
 
 - output is a terminal (`isatty`)
 - terminal size is large enough (at least `110x26`)
+
+## Terminal Demo Script
+
+Run:
+
+```bash
+./test_terminal.sh
+```
+
+The script:
+- clears the screen,
+- prints a name in red on black at row 5, col 10,
+- prints a group in green on white at row 6, col 8,
+- moves the cursor to row 10, col 1 and resets colors.
 
 ## Quick Start
 

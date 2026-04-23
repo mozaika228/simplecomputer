@@ -19,11 +19,12 @@
 #define MEM_TOP 3
 #define MEM_LEFT 2
 #define TERM_TOP 17
-#define TERM_ROWS 6
+#define TERM_ROWS 4
 #define TERM_COLS 92
 
 static char g_term_lines[TERM_ROWS][TERM_COLS + 1];
 static int g_term_count = 0;
+static SCComputer *g_console_sc = NULL;
 
 static void term_pushf(const char *fmt, ...) {
     char line[TERM_COLS + 1];
@@ -44,6 +45,15 @@ static void term_pushf(const char *fmt, ...) {
     }
     strncpy(g_term_lines[TERM_ROWS - 1], line, TERM_COLS);
     g_term_lines[TERM_ROWS - 1][TERM_COLS] = '\0';
+}
+
+void printTerm(int address, int input) {
+    if (!g_console_sc) return;
+    if (address < 0 || address >= SC_MEMORY_SIZE) return;
+
+    int16_t value = 0;
+    if (sc_memory_get(g_console_sc, address, &value) != 0) return;
+    term_pushf("%s [%03d] = %d", input ? "IN " : "OUT", address, value);
 }
 
 static void print_binary15(uint16_t value) {
@@ -108,15 +118,16 @@ static void ui_printCounters(const SCComputer *sc) {
            (unsigned long long)sc->io_cycles);
 }
 
-static void ui_printCommand(const SCComputer *sc) {
-    uint16_t cell = (uint16_t)sc->memory[sc->instruction_counter] & SC_WORD_MASK;
+void printCommand(void) {
+    if (!g_console_sc) return;
+    uint16_t cell = (uint16_t)g_console_sc->memory[g_console_sc->instruction_counter] & SC_WORD_MASK;
     uint8_t opcode = 0, operand = 0;
 
     mt_gotoXY(16, 2);
     if (sc_command_decode((int16_t)cell, &opcode, &operand) == 0) {
         printf("COMMAND: + %02u %02u", opcode, operand);
     } else {
-        printf("COMMAND: data word (%u)", cell);
+        printf("COMMAND: ! %04X", cell);
     }
 }
 
@@ -145,7 +156,7 @@ static void draw_console(const SCComputer *sc) {
     ui_printDecodedCommand(sc);
     ui_printAccumulator(sc);
     ui_printCounters(sc);
-    ui_printCommand(sc);
+    printCommand();
     ui_printTerm();
     fflush(stdout);
 }
@@ -157,6 +168,7 @@ static void print_help_message(void) {
 int main(int argc, char **argv) {
     SCComputer sc;
     sc_init(&sc);
+    g_console_sc = &sc;
 
     if (!isatty(fileno(stdout))) {
         fprintf(stderr, "console: stdout is not a terminal (isatty failed)\n");
@@ -182,6 +194,9 @@ int main(int argc, char **argv) {
         term_pushf("loaded memory: %s", argv[1]);
     } else {
         term_pushf("memory initialized");
+    }
+    for (int i = 0; i < 7; ++i) {
+        printTerm(i, 0);
     }
     print_help_message();
 
@@ -227,7 +242,10 @@ int main(int argc, char **argv) {
         int value = 0;
 
         if (sscanf(cmd, "load %127s", p1) == 1) {
-            if (sc_memory_load(&sc, p1) == 0) term_pushf("load: %s", p1);
+            if (sc_memory_load(&sc, p1) == 0) {
+                term_pushf("load: %s", p1);
+                for (int i = 0; i < 7; ++i) printTerm(i, 0);
+            }
             else term_pushf("load error: %s", p1);
             continue;
         }
@@ -237,7 +255,10 @@ int main(int argc, char **argv) {
             continue;
         }
         if (sscanf(cmd, "set %d %d", &addr, &value) == 2) {
-            if (sc_memory_set(&sc, addr, (int16_t)value) == 0) term_pushf("set: mem[%d]=%d", addr, value);
+            if (sc_memory_set(&sc, addr, (int16_t)value) == 0) {
+                term_pushf("set: mem[%d]=%d", addr, value);
+                printTerm(addr, 0);
+            }
             else term_pushf("set error: addr=%d val=%d", addr, value);
             continue;
         }

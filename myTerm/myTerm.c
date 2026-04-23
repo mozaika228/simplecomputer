@@ -70,6 +70,10 @@ int mt_getscreensize(int *rows, int *cols) {
 #endif
 }
 
+int mt_getscreenize(int *rows, int *cols) {
+    return mt_getscreensize(rows, cols);
+}
+
 int mt_setfgcolor(mt_color color) {
     char buf[16];
     if (color < MT_COLOR_BLACK || color > MT_COLOR_WHITE) return -1;
@@ -94,4 +98,8 @@ int mt_setcursorvisible(int value) {
 
 int mt_delLine(void) {
     return mt_write_str("\033[2K\r");
+}
+
+int mt_delline(void) {
+    return mt_delLine();
 }
