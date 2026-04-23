@@ -53,7 +53,7 @@ static void print_binary15(uint16_t value) {
     }
 }
 
-static void printCell(const SCComputer *sc, int address, int selected) {
+static void ui_printCell(const SCComputer *sc, int address, int selected) {
     int row = MEM_TOP + (address / 16);
     int col = MEM_LEFT + (address % 16) * 7;
     uint16_t cell = (uint16_t)sc->memory[address] & SC_WORD_MASK;
@@ -75,7 +75,7 @@ static void printCell(const SCComputer *sc, int address, int selected) {
     mt_setdefaultcolor();
 }
 
-static void printFlags(const SCComputer *sc) {
+static void ui_printFlags(const SCComputer *sc) {
     mt_gotoXY(12, 2);
     printf("FLAGS: %c %c %c %c %c",
            (sc->flags & SC_FLAG_OVERFLOW) ? 'P' : '_',
@@ -85,19 +85,19 @@ static void printFlags(const SCComputer *sc) {
            (sc->flags & SC_FLAG_COMMAND) ? 'E' : '_');
 }
 
-static void printDecodedCommand(const SCComputer *sc) {
+static void ui_printDecodedCommand(const SCComputer *sc) {
     uint16_t cell = (uint16_t)sc->memory[sc->instruction_counter] & SC_WORD_MASK;
     mt_gotoXY(13, 2);
     printf("DECODED: dec=%5u oct=%06o hex=%04X bin=", cell, cell, cell);
     print_binary15(cell);
 }
 
-static void printAccumulator(const SCComputer *sc) {
+static void ui_printAccumulator(const SCComputer *sc) {
     mt_gotoXY(14, 2);
     printf("ACCUMULATOR: %+6d", sc->accumulator);
 }
 
-static void printCounters(const SCComputer *sc) {
+static void ui_printCounters(const SCComputer *sc) {
     mt_gotoXY(15, 2);
     printf("COUNTERS: IC=%3u  MEM=%llu  HIT=%llu  MISS=%llu  STALL=%llu  IO=%llu",
            sc->instruction_counter,
@@ -108,7 +108,7 @@ static void printCounters(const SCComputer *sc) {
            (unsigned long long)sc->io_cycles);
 }
 
-static void printCommand(const SCComputer *sc) {
+static void ui_printCommand(const SCComputer *sc) {
     uint16_t cell = (uint16_t)sc->memory[sc->instruction_counter] & SC_WORD_MASK;
     uint8_t opcode = 0, operand = 0;
 
@@ -120,7 +120,7 @@ static void printCommand(const SCComputer *sc) {
     }
 }
 
-static void printTerm(void) {
+static void ui_printTerm(void) {
     mt_gotoXY(TERM_TOP - 1, 2);
     printf("IN-OUT:");
     for (int i = 0; i < TERM_ROWS; ++i) {
@@ -139,14 +139,14 @@ static void draw_console(const SCComputer *sc) {
 
     for (int i = 0; i < SC_MEMORY_SIZE; ++i) {
         int selected = (i == (int)sc->instruction_counter);
-        printCell(sc, i, selected);
+        ui_printCell(sc, i, selected);
     }
-    printFlags(sc);
-    printDecodedCommand(sc);
-    printAccumulator(sc);
-    printCounters(sc);
-    printCommand(sc);
-    printTerm();
+    ui_printFlags(sc);
+    ui_printDecodedCommand(sc);
+    ui_printAccumulator(sc);
+    ui_printCounters(sc);
+    ui_printCommand(sc);
+    ui_printTerm();
     fflush(stdout);
 }
 

@@ -7,12 +7,34 @@
 #include <windows.h>
 #include <io.h>
 #define write _write
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
 #else
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
 
+#ifdef _WIN32
+static void mt_enable_vt_mode(void) {
+    static int initialized = 0;
+    if (initialized) return;
+    initialized = 1;
+
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out == INVALID_HANDLE_VALUE) return;
+
+    DWORD mode = 0;
+    if (!GetConsoleMode(out, &mode)) return;
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(out, mode);
+}
+#endif
+
 static int mt_write_str(const char *s) {
+#ifdef _WIN32
+    mt_enable_vt_mode();
+#endif
     size_t len = strlen(s);
     return (write(1, s, (unsigned)len) == (int)len) ? 0 : -1;
 }
