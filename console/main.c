@@ -1,91 +1,77 @@
+#include "myBigChars.h"
+#include "myReadKey.h"
 #include "mySimpleComputer.h"
 #include "myTerm.h"
-#include "simpleassembler.h"
-#include "simplebasic.h"
 
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
 #include <io.h>
 #define isatty _isatty
 #define fileno _fileno
+#define read _read
 #else
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
-#define MEM_TOP 3
-#define MEM_LEFT 2
-#define TERM_TOP 17
-#define TERM_ROWS 4
-#define TERM_COLS 92
+static volatile sig_atomic_t g_tick = 0;
+static volatile sig_atomic_t g_reset = 0;
+static int g_selected = 0;
+static int g_running = 0;
 
-static char g_term_lines[TERM_ROWS][TERM_COLS + 1];
-static int g_term_count = 0;
-static SCComputer *g_console_sc = NULL;
-
-static void term_pushf(const char *fmt, ...) {
-    char line[TERM_COLS + 1];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(line, sizeof(line), fmt, args);
-    va_end(args);
-
-    if (g_term_count < TERM_ROWS) {
-        strncpy(g_term_lines[g_term_count], line, TERM_COLS);
-        g_term_lines[g_term_count][TERM_COLS] = '\0';
-        g_term_count++;
-        return;
-    }
-
-    for (int i = 1; i < TERM_ROWS; ++i) {
-        strncpy(g_term_lines[i - 1], g_term_lines[i], TERM_COLS + 1);
-    }
-    strncpy(g_term_lines[TERM_ROWS - 1], line, TERM_COLS);
-    g_term_lines[TERM_ROWS - 1][TERM_COLS] = '\0';
+static void on_sigalrm(int sig) {
+    (void)sig;
+    g_tick = 1;
 }
 
-void printTerm(int address, int input) {
-    if (!g_console_sc) return;
-    if (address < 0 || address >= SC_MEMORY_SIZE) return;
-
-    int16_t value = 0;
-    if (sc_memory_get(g_console_sc, address, &value) != 0) return;
-    term_pushf("%s [%03d] = %d", input ? "IN " : "OUT", address, value);
+static void on_sigusr1(int sig) {
+    (void)sig;
+    g_reset = 1;
 }
 
-static void print_binary15(uint16_t value) {
-    for (int i = 14; i >= 0; --i) {
-        putchar((value >> i) & 1u ? '1' : '0');
-        if (i % 4 == 0 && i != 0) putchar(' ');
-    }
+static void timer_start(void) {
+#ifndef _WIN32
+    struct itimerval it;
+    memset(&it, 0, sizeof(it));
+    it.it_interval.tv_usec = 100000;
+    it.it_value.tv_usec = 100000;
+    setitimer(ITIMER_REAL, &it, NULL);
+#endif
 }
 
-static void ui_printCell(const SCComputer *sc, int address, int selected) {
-    int row = MEM_TOP + (address / 16);
-    int col = MEM_LEFT + (address % 16) * 7;
-    uint16_t cell = (uint16_t)sc->memory[address] & SC_WORD_MASK;
-    uint8_t opcode = 0, operand = 0;
-    int is_cmd = sc_command_decode((int16_t)cell, &opcode, &operand) == 0;
+static void timer_stop(void) {
+#ifndef _WIN32
+    struct itimerval it;
+    memset(&it, 0, sizeof(it));
+    setitimer(ITIMER_REAL, &it, NULL);
+#endif
+}
 
-    mt_gotoXY(row, col);
-    if (selected) {
+static void print_cell(const SCComputer *sc, int addr) {
+    int r = 3 + addr / 16;
+    int c = 2 + (addr % 16) * 7;
+    mt_gotoXY(r, c);
+    if (addr == g_selected) {
         mt_setfgcolor(MT_COLOR_BLACK);
         mt_setbgcolor(MT_COLOR_CYAN);
-    } else if (is_cmd) {
-        mt_setfgcolor(MT_COLOR_GREEN);
-        mt_setbgcolor(MT_COLOR_BLACK);
     } else {
         mt_setfgcolor(MT_COLOR_WHITE);
         mt_setbgcolor(MT_COLOR_BLACK);
     }
-    printf("+%04X ", cell);
+    printf("+%04X ", (unsigned)(sc->memory[addr] & SC_WORD_MASK));
     mt_setdefaultcolor();
 }
 
-static void ui_printFlags(const SCComputer *sc) {
+static void print_grid(const SCComputer *sc) {
+    for (int i = 0; i < SC_MEMORY_SIZE; ++i) print_cell(sc, i);
+}
+
+static void print_flags(const SCComputer *sc) {
     mt_gotoXY(12, 2);
     printf("FLAGS: %c %c %c %c %c",
            (sc->flags & SC_FLAG_OVERFLOW) ? 'P' : '_',
@@ -95,191 +81,149 @@ static void ui_printFlags(const SCComputer *sc) {
            (sc->flags & SC_FLAG_COMMAND) ? 'E' : '_');
 }
 
-static void ui_printDecodedCommand(const SCComputer *sc) {
-    uint16_t cell = (uint16_t)sc->memory[sc->instruction_counter] & SC_WORD_MASK;
+static void print_command(const SCComputer *sc) {
     mt_gotoXY(13, 2);
-    printf("DECODED: dec=%5u oct=%06o hex=%04X bin=", cell, cell, cell);
-    print_binary15(cell);
+    uint16_t v = (uint16_t)(sc->memory[sc->instruction_counter] & SC_WORD_MASK);
+    uint8_t op = 0, arg = 0;
+    if (sc_command_decode((int16_t)v, &op, &arg) == 0) printf("COMMAND: + %02u %02u", op, arg);
+    else printf("COMMAND: ! %04X", v);
 }
 
-static void ui_printAccumulator(const SCComputer *sc) {
+static void print_regs(const SCComputer *sc) {
     mt_gotoXY(14, 2);
-    printf("ACCUMULATOR: %+6d", sc->accumulator);
+    printf("ACC=%+6d  IC=%3u  RUN=%d", sc->accumulator, sc->instruction_counter, g_running ? 1 : 0);
 }
 
-static void ui_printCounters(const SCComputer *sc) {
+static void print_help(void) {
     mt_gotoXY(15, 2);
-    printf("COUNTERS: IC=%3u  MEM=%llu  HIT=%llu  MISS=%llu  STALL=%llu  IO=%llu",
-           sc->instruction_counter,
-           (unsigned long long)sc->memory_accesses,
-           (unsigned long long)sc->cache_hits,
-           (unsigned long long)sc->cache_misses,
-           (unsigned long long)sc->stall_cycles,
-           (unsigned long long)sc->io_cycles);
+    printf("Keys: arrows move | Enter edit memory | F5 edit ACC | F6 edit IC | Esc exit | r run/stop | s step");
 }
 
-void printCommand(void) {
-    if (!g_console_sc) return;
-    uint16_t cell = (uint16_t)g_console_sc->memory[g_console_sc->instruction_counter] & SC_WORD_MASK;
-    uint8_t opcode = 0, operand = 0;
-
-    mt_gotoXY(16, 2);
-    if (sc_command_decode((int16_t)cell, &opcode, &operand) == 0) {
-        printf("COMMAND: + %02u %02u", opcode, operand);
-    } else {
-        printf("COMMAND: ! %04X", cell);
-    }
+static void printBigCell(const SCComputer *sc) {
+    bc_box(17, 2, 26, 55);
+    mt_gotoXY(17, 4);
+    printf("Big cell @%03d", g_selected);
+    bc_print_bigvalue((uint16_t)sc->memory[g_selected], 18, 4);
 }
 
-static void ui_printTerm(void) {
-    mt_gotoXY(TERM_TOP - 1, 2);
-    printf("IN-OUT:");
-    for (int i = 0; i < TERM_ROWS; ++i) {
-        mt_gotoXY(TERM_TOP + i, 2);
-        mt_delLine();
-        mt_gotoXY(TERM_TOP + i, 2);
-        if (i < g_term_count) printf("%s", g_term_lines[i]);
-    }
-}
-
-static void draw_console(const SCComputer *sc) {
+static void redraw(const SCComputer *sc) {
     mt_clrscr();
     mt_setcursorvisible(0);
     mt_gotoXY(1, 2);
-    printf("Simple Computer Console  |  commands: run step reset load save asm basic set help exit");
-
-    for (int i = 0; i < SC_MEMORY_SIZE; ++i) {
-        int selected = (i == (int)sc->instruction_counter);
-        ui_printCell(sc, i, selected);
-    }
-    ui_printFlags(sc);
-    ui_printDecodedCommand(sc);
-    ui_printAccumulator(sc);
-    ui_printCounters(sc);
-    printCommand();
-    ui_printTerm();
+    printf("Simple Computer interactive console");
+    print_grid(sc);
+    print_flags(sc);
+    print_command(sc);
+    print_regs(sc);
+    print_help();
+    printBigCell(sc);
     fflush(stdout);
 }
 
-static void print_help_message(void) {
-    term_pushf("help: run | step | reset | load <f> | save <f> | asm <in.sa> <out.sc> | basic <in.sb> <out.sa> | set <a> <v> | exit");
+static void prompt_edit_int(const char *title, int *out) {
+    rk_mytermrestore();
+    mt_setcursorvisible(1);
+    mt_gotoXY(28, 2);
+    mt_delline();
+    printf("%s: ", title);
+    fflush(stdout);
+    int v = 0;
+    if (scanf("%d", &v) == 1) *out = v;
+    while (getchar() != '\n') {}
+    rk_mytermsave();
+    rk_mytermregime(1, 1, 0, 0, 1);
+}
+
+static void move_sel(ReadKey k) {
+    int row = g_selected / 16;
+    int col = g_selected % 16;
+    if (k == RK_UP && row > 0) row--;
+    if (k == RK_DOWN && row < 7) row++;
+    if (k == RK_LEFT && col > 0) col--;
+    if (k == RK_RIGHT && col < 15) col++;
+    g_selected = row * 16 + col;
 }
 
 int main(int argc, char **argv) {
     SCComputer sc;
     sc_init(&sc);
-    g_console_sc = &sc;
+    if (argc == 2) sc_memory_load(&sc, argv[1]);
 
     if (!isatty(fileno(stdout))) {
-        fprintf(stderr, "console: stdout is not a terminal (isatty failed)\n");
+        fprintf(stderr, "stdout is not a terminal\n");
+        return 1;
+    }
+    int rows = 0, cols = 0;
+    if (mt_getscreensize(&rows, &cols) != 0 || rows < 30 || cols < 120) {
+        fprintf(stderr, "terminal too small: need 120x30, got %dx%d\n", cols, rows);
         return 1;
     }
 
-    int rows = 0;
-    int cols = 0;
-    if (mt_getscreensize(&rows, &cols) != 0) {
-        fprintf(stderr, "console: cannot detect terminal size\n");
-        return 1;
-    }
-    if (rows < 26 || cols < 110) {
-        fprintf(stderr, "console: terminal is too small, need at least 110x26, got %dx%d\n", cols, rows);
-        return 1;
-    }
+    signal(SIGALRM, on_sigalrm);
+#ifdef SIGUSR1
+    signal(SIGUSR1, on_sigusr1);
+#endif
+    timer_start();
 
-    if (argc == 2) {
-        if (sc_memory_load(&sc, argv[1]) != 0) {
-            fprintf(stderr, "Cannot load memory file: %s\n", argv[1]);
-            return 1;
-        }
-        term_pushf("loaded memory: %s", argv[1]);
-    } else {
-        term_pushf("memory initialized");
-    }
-    for (int i = 0; i < 7; ++i) {
-        printTerm(i, 0);
-    }
-    print_help_message();
+    rk_mytermsave();
+    rk_mytermregime(1, 1, 0, 0, 1);
 
-    char cmd[256];
-    while (1) {
-        draw_console(&sc);
-        mt_setcursorvisible(1);
-        mt_gotoXY(rows, 1);
-        mt_delLine();
-        printf("sc> ");
-        fflush(stdout);
-
-        if (!fgets(cmd, sizeof(cmd), stdin)) break;
-        cmd[strcspn(cmd, "\r\n")] = '\0';
-
-        if (strncmp(cmd, "exit", 4) == 0) {
-            term_pushf("exit requested");
-            break;
-        }
-        if (strncmp(cmd, "help", 4) == 0) {
-            print_help_message();
-            continue;
-        }
-        if (strncmp(cmd, "run", 3) == 0) {
-            sc_run(&sc, -1);
-            term_pushf("run: program stopped");
-            continue;
-        }
-        if (strncmp(cmd, "step", 4) == 0) {
-            int rc = sc_step(&sc);
-            term_pushf("step: rc=%d ic=%u", rc, sc.instruction_counter);
-            continue;
-        }
-        if (strncmp(cmd, "reset", 5) == 0) {
+    int done = 0;
+    while (!done) {
+        if (g_reset) {
             sc_init(&sc);
-            term_pushf("reset: cpu and memory cleared");
+            g_reset = 0;
+            g_running = 0;
+        }
+
+        if (g_running && g_tick) {
+            g_tick = 0;
+            if (sc_step(&sc) != 0) g_running = 0;
+        }
+
+        redraw(&sc);
+        ReadKey k = rk_read_key();
+        if (k == RK_ESC) {
+            done = 1;
+            continue;
+        }
+        if (k == RK_UP || k == RK_DOWN || k == RK_LEFT || k == RK_RIGHT) {
+            move_sel(k);
+            continue;
+        }
+        if (k == RK_ENTER) {
+            int v = sc.memory[g_selected];
+            prompt_edit_int("Memory value", &v);
+            sc_memory_set(&sc, g_selected, (int16_t)v);
+            continue;
+        }
+        if (k == RK_F5) {
+            int v = sc.accumulator;
+            prompt_edit_int("Accumulator", &v);
+            sc.accumulator = (int16_t)v;
+            continue;
+        }
+        if (k == RK_F6) {
+            int v = sc.instruction_counter;
+            prompt_edit_int("Instruction Counter", &v);
+            if (v >= 0 && v < SC_MEMORY_SIZE) sc.instruction_counter = (uint8_t)v;
             continue;
         }
 
-        char p1[128];
-        char p2[128];
-        int addr = 0;
-        int value = 0;
-
-        if (sscanf(cmd, "load %127s", p1) == 1) {
-            if (sc_memory_load(&sc, p1) == 0) {
-                term_pushf("load: %s", p1);
-                for (int i = 0; i < 7; ++i) printTerm(i, 0);
+        if (k == RK_UNKNOWN) {
+            unsigned char ch = 0;
+            if (read(0, &ch, 1) == 1) {
+                if (ch == 'r' || ch == 'R') g_running = !g_running;
+                if (ch == 's' || ch == 'S') sc_step(&sc);
             }
-            else term_pushf("load error: %s", p1);
-            continue;
         }
-        if (sscanf(cmd, "save %127s", p1) == 1) {
-            if (sc_memory_save(&sc, p1) == 0) term_pushf("save: %s", p1);
-            else term_pushf("save error: %s", p1);
-            continue;
-        }
-        if (sscanf(cmd, "set %d %d", &addr, &value) == 2) {
-            if (sc_memory_set(&sc, addr, (int16_t)value) == 0) {
-                term_pushf("set: mem[%d]=%d", addr, value);
-                printTerm(addr, 0);
-            }
-            else term_pushf("set error: addr=%d val=%d", addr, value);
-            continue;
-        }
-        if (sscanf(cmd, "asm %127s %127s", p1, p2) == 2) {
-            if (sa_assemble_file(p1, p2) == 0) term_pushf("asm: %s -> %s", p1, p2);
-            else term_pushf("asm error");
-            continue;
-        }
-        if (sscanf(cmd, "basic %127s %127s", p1, p2) == 2) {
-            if (sb_compile_file(p1, p2) == 0) term_pushf("basic: %s -> %s", p1, p2);
-            else term_pushf("basic error");
-            continue;
-        }
-
-        term_pushf("unknown command: %s", cmd);
     }
 
+    rk_mytermrestore();
+    timer_stop();
     mt_setdefaultcolor();
     mt_setcursorvisible(1);
     mt_gotoXY(rows, 1);
-    mt_delLine();
     printf("\n");
     return 0;
 }
